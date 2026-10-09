@@ -10,7 +10,7 @@ usage:
   infer_visit.py --frames dir  --out /work/out
 
 Outputs in --out:
-  keyframes/%06d.jpg   every processed frame at model resolution (518 wide, crop mode)
+  keyframes/%06d.jpg   every processed frame: keyframes at --scale_w (full), in-between at model res
   poses.npz            c2w [N,4,4], w2c [N,4,4], K [N,3,3], is_keyframe [N], frame_type [N], names
   depth.npz            depth [N,H,W] f16, conf [N,H,W] f16
   cloud.npz            xyz f32, rgb u8, conf f32, cams f32  (for build_explorer.py)
@@ -43,7 +43,7 @@ src.add_argument("--frames")
 ap.add_argument("--out", required=True)
 ap.add_argument("--fps", type=float, default=10.0, help="extraction rate from --video")
 ap.add_argument("--max_frames", type=int, default=960, help="cap after extraction (uniform subsample)")
-ap.add_argument("--scale_w", type=int, default=720, help="ffmpeg scale width before model preprocessing")
+ap.add_argument("--scale_w", type=int, default=1440, help="ffmpeg scale width; keyframes are kept at this size for crops (model input is 518 regardless)")
 ap.add_argument("--model_path", default="/opt/ckpt/lingbot-map.pt")
 ap.add_argument("--keyframe_interval", type=int, default=0, help="0 = ceil(N/320)")
 ap.add_argument("--num_scale_frames", type=int, default=8)
@@ -72,7 +72,7 @@ if args.video:
     shutil.rmtree(frames_dir, ignore_errors=True)
     os.makedirs(frames_dir)
     cmd = ["ffmpeg", "-loglevel", "error", "-i", args.video,
-           "-vf", f"fps={args.fps},scale={args.scale_w}:-2", "-q:v", "2",
+           "-vf", f"fps={args.fps},scale='min({args.scale_w},iw)':-2", "-q:v", "2",   # never upscale a 720p clip
            os.path.join(frames_dir, "%06d.jpg")]
     log("extracting:", " ".join(cmd))
     subprocess.run(cmd, check=True)
@@ -157,10 +157,22 @@ shutil.rmtree(kf_dir, ignore_errors=True)
 os.makedirs(kf_dir)
 names = []
 imgs = (images.numpy().transpose(0, 2, 3, 1) * 255).round().astype(np.uint8)
+# Keyframes keep the full extracted frame (pairing, VLM triage and the before/after crops read
+# these; at model resolution every crop was a thumbnail). In-between frames stay at model
+# resolution. Findings are anchored in the full frame; meta["crop"] lets the report map an
+# anchor back into the model's 518-wide, centre-cropped view where the depth lives.
+with Image.open(paths[0]) as im0:
+    src_w, src_h = im0.size
+resized_h = round(src_h * (W / src_w) / 14) * 14           # mirrors load_and_preprocess_images(mode="crop")
+crop_y0 = (resized_h - H) // 2 if resized_h > H else 0
 for i in range(N):
     name = f"{i:06d}.jpg"
-    Image.fromarray(imgs[i]).save(os.path.join(kf_dir, name), quality=92)
+    if is_kf[i]:
+        shutil.copyfile(paths[i], os.path.join(kf_dir, name))
+    else:
+        Image.fromarray(imgs[i]).save(os.path.join(kf_dir, name), quality=92)
     names.append(name)
+crop_info = dict(model_w=int(W), model_h=int(H), src_w=src_w, src_h=src_h, resized_h=int(resized_h), crop_y0=int(crop_y0))
 
 np.savez(os.path.join(out, "poses.npz"), c2w=c2w.astype(np.float32), w2c=w2c.astype(np.float32),
          K=K.astype(np.float32), is_keyframe=is_kf, frame_type=frame_type,
@@ -188,7 +200,7 @@ np.savez_compressed(os.path.join(out, "cloud.npz"), xyz=xyz, rgb=rgb, conf=cf, c
 lo, hi = np.percentile(xyz, 1, 0), np.percentile(xyz, 99, 0)
 meta = {
     "frames": N, "keyframes": int(is_kf.sum()), "keyframe_interval": kf_interval,
-    "image_hw": [int(H), int(W)], "gpu": gpu_name, "amp": str(amp_dtype), "sdpa": use_sdpa,
+    "image_hw": [int(H), int(W)], "crop": crop_info, "gpu": gpu_name, "amp": str(amp_dtype), "sdpa": use_sdpa,
     "infer_seconds": round(t_infer, 1), "fps": round(N / t_infer, 2),
     "peak_vram_gib": round(torch.cuda.max_memory_allocated() / 2**30, 2),
     "cloud_points": int(len(xyz)), "cloud_extent_p1p99": np.round(hi - lo, 3).tolist(),
