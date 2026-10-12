@@ -43,9 +43,11 @@ def log(*m):
 # ---------------------------------------------------------------- data
 P = np.load(inp / "poses.npz")
 names = [str(n) for n in P["names"]]
-imgs = torch.stack([torch.from_numpy(np.asarray(Image.open(inp / "keyframes" / n).convert("RGB")))
+H, W = json.loads((inp / "meta.json").read_text())["image_hw"]   # model resolution, what K is for
+# lingbot keyframes are saved at full resolution, the other frames at model resolution: bring all to K's
+imgs = torch.stack([torch.from_numpy(np.asarray(Image.open(inp / "keyframes" / n).convert("RGB").resize((W, H), Image.BILINEAR)))
                     for n in names]).to(dev)                                  # [F,H,W,3] uint8
-Fn, H, W = imgs.shape[:3]
+Fn = len(imgs)
 viewmats = torch.from_numpy(P["w2c"]).float().to(dev)                       # [F,4,4]
 Ks = torch.from_numpy(P["K"]).float().to(dev)                               # [F,3,3], at H x W
 log(f"{Fn} frames at {W}x{H}")
