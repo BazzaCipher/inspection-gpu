@@ -50,8 +50,8 @@ ap.add_argument("--num_scale_frames", type=int, default=8)
 ap.add_argument("--camera_num_iterations", type=int, default=4)
 ap.add_argument("--vis_threshold", type=float, default=2.5, help="depth_conf cut for cloud.npz")
 ap.add_argument("--max_depth", type=float, default=10.0)
-ap.add_argument("--long_side", type=int, default=518, help="model input long side (multiple of 14); the "
-                "whole frame is kept, so portrait 518 is only 294x518; 728 gives the old crop's pixel count")
+ap.add_argument("--long_side", type=int, default=728, help="model input long side (multiple of 14); the "
+                "whole frame is kept; 728 (portrait 406x728) beat 518 on confidence and drift, 2026-10-12")
 ap.add_argument("--cloud_max_points", type=int, default=2_000_000)
 ap.add_argument("--cloud_step", type=int, default=2, help="use every Nth frame for cloud.npz")
 args = ap.parse_args()
