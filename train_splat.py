@@ -14,6 +14,7 @@ quaternion u8x4 ((q * 128 + 128), w first). Capped at --max_gaussians (Storage f
 import argparse
 import json
 import math
+import os
 import time
 from pathlib import Path
 
@@ -28,12 +29,13 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--inp", required=True)
 ap.add_argument("--out", required=True)
 ap.add_argument("--iters", type=int, default=7000)
-ap.add_argument("--init_points", type=int, default=300_000, help="most confident cloud points to start from")
+ap.add_argument("--init_points", type=int, default=300_000, help="cloud points to start from (uniform sample)")
 ap.add_argument("--max_gaussians", type=int, default=1_400_000, help="written to .splat (32 B each)")
 a = ap.parse_args()
 t0 = time.time()
 dev = torch.device("cuda")
 inp = Path(a.inp)
+(Path(a.out).parent / "splat.pid").write_text(str(os.getpid()))   # worker.py stops a run that overruns
 
 
 def log(*m):
@@ -54,7 +56,9 @@ log(f"{Fn} frames at {W}x{H}")
 
 C = np.load(inp / "cloud.npz")
 xyz, rgb, conf = C["xyz"].astype(np.float32), C["rgb"].astype(np.float32) / 255, C["conf"].astype(np.float32)
-keep = np.argsort(-conf)[: a.init_points]
+# uniform, not most-confident: lingbot is surest on near textured surfaces, and plain walls/floors
+# (what turnover QA looks at) would start empty; the cloud is already filtered at conf > 2.5
+keep = np.random.default_rng(0).choice(len(xyz), min(a.init_points, len(xyz)), replace=False)
 xyz, rgb = torch.from_numpy(xyz[keep]).to(dev), torch.from_numpy(rgb[keep]).to(dev)
 N = len(xyz)
 extent = float(torch.quantile(torch.linalg.norm(xyz - xyz.median(0).values, dim=1), 0.95))
@@ -109,6 +113,9 @@ for step in range(a.iters):
     for g in optimizers["means"].param_groups:
         g["lr"] *= mean_decay
     strategy.step_post_backward(params, optimizers, state, step, info, packed=False)
+    if step < strategy.refine_stop_iter and len(params["means"]) > a.max_gaussians:
+        strategy.refine_stop_iter = step   # DefaultStrategy grows without a cap: stop at what the export keeps
+        log(f"step {step}: {len(params['means'])} Gaussians, densification stopped at the export cap")
     if step % 1000 == 0 or step == a.iters - 1:
         log(f"step {step} l1 {l1.item():.4f} gaussians {len(params['means'])}")
 

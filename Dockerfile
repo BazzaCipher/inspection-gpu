@@ -6,7 +6,7 @@
 # image has) for Ampere + Ada (3090/A5000/A6000 = 8.6, 4090 = 8.9); only the wheel reaches the runtime.
 FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel AS gsplat
 RUN apt-get update && apt-get install -y --no-install-recommends git
-RUN TORCH_CUDA_ARCH_LIST="8.6;8.9" MAX_JOBS=4 pip wheel --no-build-isolation --no-deps -w /wheels \
+RUN TORCH_CUDA_ARCH_LIST="8.6;8.9+PTX" MAX_JOBS=4 pip wheel --no-build-isolation --no-deps -w /wheels \
         "gsplat @ git+https://github.com/nerfstudio-project/gsplat@v1.5.3"
 
 FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime
