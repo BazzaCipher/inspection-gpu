@@ -92,7 +92,6 @@ log(f"{N} frames, keyframe_interval={kf_interval} (~{math.ceil(N / kf_interval)}
 # ---------------------------------------------------------------- model
 sys.path.insert(0, "/opt/lingbot-map")
 from lingbot_map.models.gct_stream import GCTStream  # noqa: E402
-from lingbot_map.utils.load_fn import load_and_preprocess_images  # noqa: E402
 from lingbot_map.utils.pose_enc import pose_encoding_to_extri_intri  # noqa: E402
 
 try:
@@ -124,7 +123,16 @@ model = model.to(device).eval()
 model.aggregator = model.aggregator.to(dtype=amp_dtype)
 
 # ---------------------------------------------------------------- inference
-images = load_and_preprocess_images(paths, mode="crop", image_size=518, patch_size=14)  # [S,3,H,W] in [0,1]
+# Whole frame, long side 518, no crop: lingbot's "crop" mode centre-cropped portrait phone video
+# to a square and threw away the top and bottom 44% (floor and ceiling). Portrait also costs 57% of
+# the tokens of 518x518, so it is faster and lighter than before.
+def fit(path):
+    with Image.open(path) as im:
+        w, h = im.size
+        s = 518 / max(w, h)
+        size = (max(14, round(w * s / 14) * 14), max(14, round(h * s / 14) * 14))
+        return torch.from_numpy(np.asarray(im.convert("RGB").resize(size, Image.BICUBIC), dtype=np.float32) / 255).permute(2, 0, 1)
+images = torch.stack([fit(p) for p in paths])  # [S,3,H,W] in [0,1]
 H, W = images.shape[-2:]
 images = images.pin_memory()
 log(f"preprocessed to {W}x{H}; running streaming inference")
@@ -160,11 +168,10 @@ imgs = (images.numpy().transpose(0, 2, 3, 1) * 255).round().astype(np.uint8)
 # Keyframes keep the full extracted frame (pairing, VLM triage and the before/after crops read
 # these; at model resolution every crop was a thumbnail). In-between frames stay at model
 # resolution. Findings are anchored in the full frame; meta["crop"] lets the report map an
-# anchor back into the model's 518-wide, centre-cropped view where the depth lives.
+# anchor back into the model-resolution view where the depth lives.
 with Image.open(paths[0]) as im0:
     src_w, src_h = im0.size
-resized_h = round(src_h * (W / src_w) / 14) * 14           # mirrors load_and_preprocess_images(mode="crop")
-crop_y0 = (resized_h - H) // 2 if resized_h > H else 0
+resized_h, crop_y0 = H, 0                                   # fit(): whole frame, nothing cropped
 for i in range(N):
     name = f"{i:06d}.jpg"
     if is_kf[i]:
