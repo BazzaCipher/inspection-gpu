@@ -154,6 +154,11 @@ decoded4[..., :3, :4] = decoded.cpu()
 w2c = torch.linalg.inv(decoded4)                          # == batch_demo's saved `extrinsic`
 c2w = torch.linalg.inv(w2c)
 w2c, c2w, K = w2c[0].numpy(), c2w[0].numpy(), K[0].cpu().numpy()
+# lingbot predicts near-square FOVs on portrait video (44 x 47 deg), so fy came out 1.7x fx and the
+# cloud was squashed vertically. Pixels are square, and the short-side focal is the right one: it
+# matched the iPhone's own metadata (26 mm equiv -> 500.9 px at 406x728; lingbot 502).
+f = (K[:, 0, 0] if W <= H else K[:, 1, 1]).copy()
+K[:, 0, 0] = K[:, 1, 1] = f
 depth = pred["depth"][0, ..., 0].float().numpy()          # [S,H,W]
 conf = pred["depth_conf"][0].float().numpy()              # [S,H,W]
 is_kf = pred["is_keyframe"][0].cpu().numpy().astype(bool)
