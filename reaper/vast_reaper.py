@@ -87,8 +87,38 @@ def reap(k=None, keep=None):
     return left
 
 
+def reap_all(k=None):
+    """--all: destroy every inspect-* instance now. ExecStopPost of a stopped/killed run unit, so a
+    worker cut off before its own destroy can't leave a machine billing until its deadline."""
+    k = k or key()
+    for i in call("GET", "/v1/instances/", k).get("instances", []):
+        if (i.get("label") or "").startswith("inspect-"):
+            try:
+                call("DELETE", f"/v0/instances/{i['id']}/", k)
+                log(f"destroyed {i['id']} ({i.get('label')}): --all")
+            except urllib.error.HTTPError as e:
+                log(f"--all: destroy {i['id']} failed: {e}")
+
+
 if __name__ == "__main__":
     try:
+        if "--ids" in sys.argv:   # ExecStopPost of a run unit: destroy exactly the machines it rented
+            f = sys.argv[sys.argv.index("--ids") + 1]
+            if os.path.exists(f):
+                k = key()
+                for iid in set(open(f).read().split()):
+                    try:
+                        call("DELETE", f"/v0/instances/{iid}/", k)
+                        log(f"destroyed {iid}: --ids (run unit stopped)")
+                    except urllib.error.HTTPError as e:
+                        if e.code != 404:
+                            log(f"--ids: destroy {iid} failed: {e}")
+                            sys.exit(2)
+                os.remove(f)
+            sys.exit(0)
+        if "--all" in sys.argv:
+            reap_all()
+            sys.exit(0)
         sys.exit(1 if reap() else 0)
     except Exception as e:  # noqa: BLE001
         log(f"reaper error: {e}")
