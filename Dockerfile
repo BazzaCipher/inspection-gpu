@@ -24,7 +24,12 @@ RUN git clone https://github.com/robbyant/lingbot-map /opt/lingbot-map \
     && pip install -e . \
     && pip install opencv-python-headless
 
-COPY infer_visit.py start.sh /app/
+# Pairing against the reference runs here too, right after inference (CPU on the orchestrator is
+# ~80 s/pair). hloc (NetVLAD retrieval) and RoMa v1, both Apache-2.0/MIT; their weights are fetched
+# while lingbot runs, not baked in. pair_visit.py + 03_ab_compare.py are copies of the pipeline ones.
+RUN pip install h5py romatch==0.1.2 "hloc @ git+https://github.com/cvg/Hierarchical-Localization@c13273bd0ecc2917a35910fd843712a1c6243193"
+
+COPY infer_visit.py start.sh pair_visit.py 03_ab_compare.py /app/
 RUN chmod +x /app/start.sh /app/infer_visit.py
 
 WORKDIR /work
