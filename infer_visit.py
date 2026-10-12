@@ -50,6 +50,8 @@ ap.add_argument("--num_scale_frames", type=int, default=8)
 ap.add_argument("--camera_num_iterations", type=int, default=4)
 ap.add_argument("--vis_threshold", type=float, default=2.5, help="depth_conf cut for cloud.npz")
 ap.add_argument("--max_depth", type=float, default=10.0)
+ap.add_argument("--long_side", type=int, default=518, help="model input long side (multiple of 14); the "
+                "whole frame is kept, so portrait 518 is only 294x518; 728 gives the old crop's pixel count")
 ap.add_argument("--cloud_max_points", type=int, default=2_000_000)
 ap.add_argument("--cloud_step", type=int, default=2, help="use every Nth frame for cloud.npz")
 args = ap.parse_args()
@@ -129,7 +131,7 @@ model.aggregator = model.aggregator.to(dtype=amp_dtype)
 def fit(path):
     with Image.open(path) as im:
         w, h = im.size
-        s = 518 / max(w, h)
+        s = args.long_side / max(w, h)
         size = (max(14, round(w * s / 14) * 14), max(14, round(h * s / 14) * 14))
         return torch.from_numpy(np.asarray(im.convert("RGB").resize(size, Image.BICUBIC), dtype=np.float32) / 255).permute(2, 0, 1)
 images = torch.stack([fit(p) for p in paths])  # [S,3,H,W] in [0,1]
