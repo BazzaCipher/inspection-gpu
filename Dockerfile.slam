@@ -1,0 +1,14 @@
+# Test image: the production image plus DROID-SLAM (BSD-3) for slam_poses.py. Its CUDA extensions
+# (lietorch, torch_scatter, droid_backends) are compiled in the devel image; only wheels reach the runtime.
+FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel AS droid
+RUN apt-get update && apt-get install -y --no-install-recommends git
+RUN git clone https://github.com/princeton-vl/DROID-SLAM /opt/droid && cd /opt/droid && git checkout 2dfd39f \
+    && git submodule update --init --recursive thirdparty/lietorch thirdparty/pytorch_scatter
+WORKDIR /opt/droid
+ENV TORCH_CUDA_ARCH_LIST="8.6;8.9+PTX" MAX_JOBS=4 FORCE_CUDA=1
+RUN pip wheel --no-build-isolation --no-deps -w /wheels thirdparty/lietorch thirdparty/pytorch_scatter .
+
+FROM ghcr.io/bazzacipher/inspection-gpu:latest
+RUN --mount=type=bind,from=droid,source=/wheels,target=/wheels pip install /wheels/*.whl matplotlib
+COPY --from=droid /opt/droid/droid_slam /opt/droid/droid_slam
+COPY slam_poses.py /app/
