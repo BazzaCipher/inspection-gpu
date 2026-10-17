@@ -138,6 +138,26 @@ images = torch.stack([fit(p) for p in paths])  # [S,3,H,W] in [0,1]
 H, W = images.shape[-2:]
 images = images.pin_memory()
 log(f"preprocessed to {W}x{H}; running streaming inference")
+
+
+# lingbot guesses the FoV along with the pose and refines both over camera_num_iterations rounds, each
+# round conditioned on the previous pose. On portrait video it guesses a near-square FoV (see K below),
+# so rotations were refined (and streamed forward) under the wrong lens. Pin square pixels, from its
+# short-side FoV, on the pose fed back each round: poses are then estimated under the real lens.
+def pin_square_pixels(head, inp):
+    x = inp[0]
+    if x.data_ptr() == head.empty_pose_tokens.data_ptr():     # round 1: learned empty pose, leave it
+        return None
+    x = x.clone()                                             # [.., 9]: T(3) quat(4) fov_h fov_w
+    if W <= H:
+        x[..., 7] = 2 * torch.atan(torch.tan(x[..., 8] / 2) * H / W)
+    else:
+        x[..., 8] = 2 * torch.atan(torch.tan(x[..., 7] / 2) * W / H)
+    return (x,)
+
+
+cam = model.camera_head
+cam.embed_pose.register_forward_pre_hook(lambda m, inp: pin_square_pixels(cam, inp))
 t0 = time.time()
 with torch.amp.autocast("cuda", dtype=amp_dtype):
     pred = model.inference_streaming(
