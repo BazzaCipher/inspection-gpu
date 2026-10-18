@@ -1,6 +1,7 @@
-# Destroys vast.ai instances past their limit, stopped, or too old, even when the box that rents
-# them is frozen or off. Copy of inspection-mock/pipeline/vast_reaper.py. Public repo: Actions are free.
-name: vast-reaper
+# Off-box backstop for Wolfgang's compute broker: destroys vast.ai / RunPod machines past
+# their deadline (in their wbroker-<lease>-<deadline> name) even when rauf is frozen or off.
+# Public repo: Actions are free. A failed run (red) means a destroy or a list failed.
+name: broker-reaper
 on:
   schedule:
     - cron: "*/10 * * * *"
@@ -13,6 +14,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - run: python3 reaper/vast_reaper.py
+      - run: python3 reaper/broker_reaper.py --selftest && python3 reaper/broker_reaper.py
         env:
           VAST_API_KEY: ${{ secrets.VAST_API_KEY }}
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
